@@ -1,11 +1,354 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="keywords" content="转盘抽奖">
+    <meta name="description" content="转盘抽奖">
+    <title>转盘抽奖-可调概率版</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
+        body {
+            background-color: #333;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            box-sizing: border-box;
+        }
+        .wrapper {
+            width: 100%;
+            max-width: 375px;
+            margin: 0 auto;
+            position: relative;
+        }
+        .content {
+            position: relative;
+        }
+        .part2 {
+            background: url('./part2-bg.png') left top no-repeat;
+            padding-top: 100%;
+            background-size: 100% 100%;
+            position: relative;
+            border-radius: 50%;
+            transition: transform 5s cubic-bezier(0.42, 0, 0, 0.99);
+        }
+        .rotate-pointer {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 30%;
+            height: 30%;
+            transform: translate(-50%, -50%);
+            background: url('./pointer.png') center center no-repeat;
+            background-size: 100% 100%;
+            cursor: pointer;
+            z-index: 10;
+        }
+        .rotate-pointer.disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .info-panel {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #fff;
+            border-radius: 8px;
+            text-align: center;
+            color: #333;
+        }
+        .probability-control {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: #f5f5f5;
+            border-radius: 5px;
+        }
+        .probability-item {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .probability-item label {
+            width: 120px;
+            display: inline-block;
+        }
+        .probability-item input {
+            flex: 1;
+            padding: 5px;
+        }
+        .total-probability {
+            margin-top: 10px;
+            font-weight: bold;
+            color: #e74c3c;
+        }
+    </style>
 </head>
 <body>
-    大转盘
+    <div class="wrapper" id="wrapper">
+        <div class="content">
+            <div class="part2" id="turntable"></div>
+            <div id="pointer" class="rotate-pointer" title="点击抽奖"></div>
+        </div>
+
+        <div class="info-panel">
+            <h3>每日抽奖活动</h3>
+            <p id="drawStatus">今天您还可以抽奖</p>
+            <p id="prizeInfo"></p>
+            
+            <div class="probability-control">
+                <h4>奖品概率</h4>
+                <div id="probabilityControls"></div>
+                <div class="total-probability" id="totalProbability">总概率: 100%</div>
+            </div>
+        </div>
+    </div>
+
+    <script src="./jqery.js"></script>
+    <script>
+    $(document).ready(function() {
+        // 奖品配置（包含概率权重）
+        const prizes = {
+            "1": {
+                id: "1",
+                name: "88元葫芦",
+                angleStart: -30,
+                angleEnd: 90,
+                tips: "恭喜您获得88元葫芦！",
+                probability: 80,  // 初始概率权重
+                defaultProb: 80   // 默认概率权重
+            },
+            "2": {
+                id: "2",
+                name: "58元葫芦",
+                angleStart: 91,
+                angleEnd: 210,
+                tips: "恭喜您获得58元葫芦！",
+                probability: 10,
+                defaultProb: 10
+            },
+            "3": {
+                id: "3",
+                name: "10元葫芦优惠券",
+                angleStart: 211,
+                angleEnd: 330,
+                tips: "恭喜您获得10元葫芦优惠券",
+                probability: 10,
+                defaultProb: 10
+            }
+        };
+
+        const pointer = $("#pointer");
+        const turntable = $(".part2");
+        const drawStatus = $("#drawStatus");
+        const prizeInfo = $("#prizeInfo");
+        const probabilityControls = $("#probabilityControls");
+        const totalProbability = $("#totalProbability");
+
+        // 初始化概率控制界面
+        initProbabilityControls();
+        // 初始化检查抽奖状态
+        checkDrawStatus();
+        // 绑定点击事件
+        pointer.on("click", startDraw);
+
+        // 初始化概率控制界面
+        function initProbabilityControls() {
+            probabilityControls.empty();
+            
+            // 为每个奖品创建概率控制项
+            for (const key in prizes) {
+                const prize = prizes[key];
+                const controlItem = $(`
+                    <div class="probability-item">
+                        <label>${prize.name}:</label>
+                        <input type="number" min="0" max="100" value="${prize.probability}" 
+                               data-id="${prize.id}" class="prob-input">
+                        <span>%</span>
+                    </div>
+                `);
+                
+                // 监听概率变化
+                controlItem.find('.prob-input').on('input', updateProbabilities);
+                probabilityControls.append(controlItem);
+            }
+            
+            updateTotalProbability();
+        }
+
+        // 更新概率权重
+        function updateProbabilities() {
+            let total = 0;
+            
+            // 更新每个奖品的概率
+            $('.prob-input').each(function() {
+                const id = $(this).data('id');
+                let value = parseInt($(this).val()) || 0;
+                
+                // 确保概率不小于0
+                value = Math.max(0, value);
+                $(this).val(value);
+                
+                prizes[id].probability = value;
+                total += value;
+            });
+            
+            updateTotalProbability();
+        }
+
+        // 更新总概率显示
+        function updateTotalProbability() {
+            const total = calculateTotalProbability();
+            totalProbability.text(`总概率: ${total}%`);
+            
+            // 高亮显示总概率不等于100%的情况
+            if (total !== 100) {
+                totalProbability.css('color', '#e74c3c');
+            } else {
+                totalProbability.css('color', '#2ecc71');
+            }
+        }
+
+        // 计算总概率
+        function calculateTotalProbability() {
+            return Object.values(prizes).reduce((sum, prize) => sum + prize.probability, 0);
+        }
+
+        // 重置为默认概率
+        function resetToDefaultProbabilities() {
+            for (const key in prizes) {
+                prizes[key].probability = prizes[key].defaultProb;
+            }
+            initProbabilityControls();
+        }
+
+        // 检查抽奖状态
+        function checkDrawStatus() {
+            if (hasDrawnToday()) {
+                pointer.addClass("disabled");
+                pointer.attr("title", "您今天已经抽过奖了");
+                drawStatus.text("今日已抽奖，请明天再来");
+                
+                // 显示昨天的抽奖结果
+                const lastPrize = localStorage.getItem('lastPrize');
+                if (lastPrize) {
+                    prizeInfo.text(`获得奖品: ${JSON.parse(lastPrize).name}`);
+                }
+            }
+        }
+
+        // 检查今天是否已经抽过奖
+        function hasDrawnToday() {
+            const lastDrawDate = localStorage.getItem('lastDrawDate');
+            if (!lastDrawDate) return false;
+            
+            const today = new Date().toDateString();
+            return lastDrawDate === today;
+        }
+
+        // 记录抽奖
+        function recordDraw(prize) {
+            const today = new Date().toDateString();
+            localStorage.setItem('lastDrawDate', today);
+            localStorage.setItem('lastPrize', JSON.stringify(prize));
+        }
+
+        // 根据概率权重选择奖品
+        function selectPrizeByProbability() {
+            const total = calculateTotalProbability();
+            if (total <= 0) return null; // 防止除以零
+            
+            // 创建一个概率区间数组
+            const probRanges = [];
+            let current = 0;
+            
+            for (const key in prizes) {
+                const prize = prizes[key];
+                const start = current;
+                const end = start + prize.probability;
+                probRanges.push({
+                    prize: prize,
+                    start: start,
+                    end: end
+                });
+                current = end;
+            }
+            
+            // 生成随机数
+            const random = Math.random() * total;
+            
+            // 找出命中的奖品
+            for (const range of probRanges) {
+                if (random >= range.start && random < range.end) {
+                    return range.prize;
+                }
+            }
+            
+            return null;
+        }
+
+        // 开始抽奖
+        function startDraw() {
+            // 检查是否已经抽过
+            if (hasDrawnToday()) {
+                alert("您今天已经抽过奖了，请明天再来！");
+                return;
+            }
+            
+            // 检查总概率
+            const total = calculateTotalProbability();
+            if (total <= 0) {
+                alert("请设置有效的奖品概率！");
+                return;
+            }
+
+            // 禁用按钮防止重复点击
+            pointer.off("click");
+            pointer.addClass("disabled");
+
+            // 根据概率选择奖品
+            const selectedPrize = selectPrizeByProbability();
+            if (!selectedPrize) {
+                alert("奖品设置错误，请检查概率设置！");
+                return;
+            }
+
+            // 在奖品角度范围内随机选择停止位置
+            const result = getRandom(selectedPrize.angleStart, selectedPrize.angleEnd);
+            
+            // 基础旋转圈数（5圈*360度=1800度）
+            const base = 1800;
+            // 计算最终旋转角度（基础圈数+停止角度）
+            const deg = base + result;
+
+            // 应用旋转动画
+            turntable.css("transform", `rotate(${deg}deg)`);
+
+            // 旋转结束后执行
+            turntable.one("transitionend", function() {
+                // 记录抽奖
+                recordDraw(selectedPrize);
+                
+                // 更新状态显示
+                drawStatus.text("今日已抽奖");
+                prizeInfo.text(`奖品: ${selectedPrize.name}`);
+                
+                // 显示中奖提示
+                setTimeout(() => {
+                    alert(selectedPrize.tips);
+                }, 500);
+            });
+        }
+
+        // 获取[n,m]范围内的随机整数
+        function getRandom(n, m) {
+            return Math.floor(Math.random() * (m - n + 1) + n);
+        }
+    });
+    </script>
 </body>
 </html>
